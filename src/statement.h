@@ -158,8 +158,11 @@ public:
         Baton* baton;
     };
 
-    struct Async {
-        uv_async_t watcher;
+    typedef void (*async_cb_t)(Async* async);
+
+    class Async: public Napi::AsyncWorker {
+	public:
+	async_cb_t async_cb;
         Statement* stmt;
         Rows data;
         NODE_SQLITE3_MUTEX_t;
@@ -171,20 +174,24 @@ public:
         Napi::FunctionReference item_cb;
         Napi::FunctionReference completed_cb;
 
-        Async(Statement* st, uv_async_cb async_cb) :
-                stmt(st), completed(false), retrieved(0) {
-            watcher.data = this;
+        Async(Statement* st, async_cb_t async_cb) :
+		Napi::AsyncWorker(st->Env()),
+		async_cb(async_cb), stmt(st), completed(false), retrieved(0) {
             NODE_SQLITE3_MUTEX_INIT
             stmt->Ref();
-            uv_loop_t *loop;
-            napi_get_uv_event_loop(stmt->Env(), &loop);
-            uv_async_init(loop, &watcher, async_cb);
         }
+
+	void Execute() override {}
+
+	void OnOk() {
+	    async_cb(this);
+	}
 
         ~Async() {
             stmt->Unref();
             item_cb.Reset();
             completed_cb.Reset();
+
             NODE_SQLITE3_MUTEX_DESTROY
         }
     };
@@ -209,8 +216,7 @@ protected:
     static void Work_Prepare(napi_env env, void* data);
     static void Work_AfterPrepare(napi_env env, napi_status status, void* data);
 
-    static void AsyncEach(uv_async_t* handle);
-    static void CloseCallback(uv_handle_t* handle);
+    static void AsyncEach(Async* handle);
 
     static void Finalize_(Baton* baton);
     void Finalize_();

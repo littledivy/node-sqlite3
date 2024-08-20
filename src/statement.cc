@@ -635,7 +635,7 @@ void Statement::Work_BeginEach(Baton* baton) {
     // Only create the Async object when we're actually going into
     // the event loop. This prevents dangling events.
     auto* each_baton = static_cast<EachBaton*>(baton);
-    each_baton->async = new Async(each_baton->stmt, reinterpret_cast<uv_async_cb>(AsyncEach));
+    each_baton->async = new Async(each_baton->stmt, reinterpret_cast<async_cb_t>(AsyncEach));
     each_baton->async->item_cb.Reset(each_baton->callback.Value(), 1);
     each_baton->async->completed_cb.Reset(each_baton->completed.Value(), 1);
 
@@ -665,8 +665,6 @@ void Statement::Work_Each(napi_env e, void* data) {
                 NODE_SQLITE3_MUTEX_LOCK(&async->mutex)
                 async->data.emplace_back(std::move(row));
                 NODE_SQLITE3_MUTEX_UNLOCK(&async->mutex)
-
-                uv_async_send(&async->watcher);
             }
             else {
                 if (stmt->status != SQLITE_DONE) {
@@ -679,19 +677,9 @@ void Statement::Work_Each(napi_env e, void* data) {
     }
 
     async->completed = true;
-    uv_async_send(&async->watcher);
 }
 
-void Statement::CloseCallback(uv_handle_t* handle) {
-    assert(handle != NULL);
-    assert(handle->data != NULL);
-    auto* async = static_cast<Async*>(handle->data);
-    delete async;
-}
-
-void Statement::AsyncEach(uv_async_t* handle) {
-    auto* async = static_cast<Async*>(handle->data);
-
+void Statement::AsyncEach(Async* async) {
     auto env = async->stmt->Env();
     Napi::HandleScope scope(env);
 
@@ -729,7 +717,6 @@ void Statement::AsyncEach(uv_async_t* handle) {
             };
             TRY_CATCH_CALL(async->stmt->Value(), cb, 2, argv);
         }
-        uv_close(reinterpret_cast<uv_handle_t*>(handle), CloseCallback);
     }
 }
 
